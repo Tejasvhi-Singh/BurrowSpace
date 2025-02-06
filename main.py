@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request
+from main import FastAPI, Request
 from pydantic import BaseModel
 from typing import Dict
 import uvicorn
