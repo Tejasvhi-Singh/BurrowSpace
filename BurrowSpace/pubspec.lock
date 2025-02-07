@@ -125,10 +125,10 @@ packages:
     dependency: "direct main"
     description:
       name: file_picker
-      sha256: c9943dd7d702ab4199d199bc151a2d79c86db031a02ad84566dab58c494d2adc
+      sha256: cacfdc5abe93e64d418caa9256eef663499ad791bb688d9fd12c85a311968fba
       url: "https://pub.dev"
     source: hosted
-    version: "8.3.1"
+    version: "8.3.2"
   fixnum:
     dependency: transitive
     description:
@@ -172,10 +172,10 @@ packages:
     dependency: "direct main"
     description:
       name: flutter_webrtc
-      sha256: "4c76069f724f79dc6e8739c8f16c2ee00ca30a1f8e3aa75c0e830f8183278f03"
+      sha256: e917067abeef2400e6a7a03db53a6e1418551e54809f18ab80447ac323eb77e4
       url: "https://pub.dev"
     source: hosted
-    version: "0.12.7"
+    version: "0.12.8"
   http:
     dependency: "direct main"
     description:
@@ -473,10 +473,10 @@ packages:
     dependency: transitive
     description:
       name: webrtc_interface
-      sha256: abec3ab7956bd5ac539cf34a42fa0c82ea26675847c0966bb85160400eea9388
+      sha256: "10fc6dc0ac16f909f5e434c18902415211d759313c87261f1e4ec5b4f6a04c26"
       url: "https://pub.dev"
     source: hosted
-    version: "1.2.0"
+    version: "1.2.1"
   win32:
     dependency: transitive
     description:

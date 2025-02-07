@@ -9,10 +9,12 @@ import 'package:encrypt/encrypt.dart' as encrypt;
 import 'package:http/http.dart' as http;
 
 void main() {
-  runApp(BurrowSpaceApp());
+  runApp(const BurrowSpaceApp());
 }
 
 class BurrowSpaceApp extends StatelessWidget {
+  const BurrowSpaceApp({super.key});
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -20,12 +22,14 @@ class BurrowSpaceApp extends StatelessWidget {
       theme: ThemeData(
         primarySwatch: Colors.blue,
       ),
-      home: HomePage(),
+      home: const HomePage(),
     );
   }
 }
 
 class HomePage extends StatefulWidget {
+  const HomePage({super.key});
+
   @override
   _HomePageState createState() => _HomePageState();
 }
@@ -34,7 +38,8 @@ class _HomePageState extends State<HomePage> {
   String? _peerCode;
   RTCPeerConnection? _peerConnection;
   RTCDataChannel? _dataChannel;
-  final String serverUrl = "https://burrowspace.onrender.com"; // Replace with actual discovery server
+  final double _progress = 0.0;
+  final String serverUrl = "https://burrowspace.onrender.com";
   final encrypt.Key _encryptionKey = encrypt.Key.fromLength(32);
   final encrypt.IV _iv = encrypt.IV.fromLength(16);
 
@@ -53,76 +58,109 @@ class _HomePageState extends State<HomePage> {
     _peerConnection = await createPeerConnection(configuration, {});
 
     _peerConnection!.onConnectionState = (RTCPeerConnectionState state) {
-      print("Connection state changed: $state");
+      debugPrint("Connection state changed: $state");
     };
 
-    _dataChannel = await _peerConnection!.createDataChannel("fileTransfer", RTCDataChannelInit());
+    _dataChannel = await _peerConnection!
+        .createDataChannel("fileTransfer", RTCDataChannelInit());
     _dataChannel!.onMessage = (RTCDataChannelMessage message) {
       _receiveFile(message.text);
     };
+
+    setState(() {
+      _peerCode = Uuid().v4().substring(0, 8);
+    });
+    debugPrint("Generated Peer Code: $_peerCode");
+
+    var response =
+        await http.get(Uri.parse("https://api64.ipify.org?format=json"));
+    String publicIP = jsonDecode(response.body)["ip"];
+    await http.post(
+      Uri.parse("$serverUrl/register"),
+      headers: {"Content-Type": "application/json"},
+      body: jsonEncode({"peerCode": _peerCode, "ip": publicIP}),
+    );
+    debugPrint(
+        "Registered receiver at IP: $publicIP with Peer Code: $_peerCode");
   }
 
-  void _sendFile() async {
-    FilePickerResult? result = await FilePicker.platform.pickFiles();
-    if (result != null) {
-      String filePath = result.files.single.path!;
-      String fileName = result.files.single.name;
-      File file = File(filePath);
-      List<int> fileBytes = await file.readAsBytes();
+  Future<void> _fetchReceiverIP() async {
+    String? enteredPeerCode = await showDialog<String>(
+      context: context,
+      builder: (BuildContext context) {
+        TextEditingController peerCodeController = TextEditingController();
+        return AlertDialog(
+          title: const Text("Enter Receiver's Peer Code"),
+          content: TextField(
+            controller: peerCodeController,
+            decoration: const InputDecoration(hintText: "Peer Code"),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () =>
+                  Navigator.of(context).pop(peerCodeController.text),
+              child: const Text("OK"),
+            ),
+          ],
+        );
+      },
+    );
 
-      var encrypter = encrypt.Encrypter(encrypt.AES(_encryptionKey));
-      String encryptedFile = base64Encode(encrypter.encryptBytes(fileBytes, iv: _iv).bytes);
+    if (enteredPeerCode == null || enteredPeerCode.isEmpty) {
+      debugPrint("No peer code entered.");
+      return;
+    }
 
-      _dataChannel?.send(RTCDataChannelMessage(jsonEncode({"fileName": fileName, "data": encryptedFile})));
-      print("File sent successfully: $fileName");
+    var response =
+        await http.get(Uri.parse("$serverUrl/lookup/$enteredPeerCode"));
+    var jsonData = jsonDecode(response.body);
+    if (jsonData is Map<String, dynamic> && jsonData.containsKey("ip")) {
+      String receiverIP = jsonData["ip"];
+      debugPrint("Resolved receiver IP: $receiverIP");
+      // Proceed with sending the file
     } else {
-      print("No file selected");
+      debugPrint("Error: Unexpected response format: $jsonData");
     }
   }
 
-  Future<void> _receiveFile(String message) async {
+  void _receiveFile(String message) async {
     var decodedData = jsonDecode(message);
     String fileName = decodedData["fileName"];
     String fileData = decodedData["data"];
 
     var encrypter = encrypt.Encrypter(encrypt.AES(_encryptionKey));
-    List<int> decryptedFileBytes = encrypter.decryptBytes(encrypt.Encrypted(base64Decode(fileData)), iv: _iv);
+    List<int> decryptedFileBytes = encrypter
+        .decryptBytes(encrypt.Encrypted(base64Decode(fileData)), iv: _iv);
 
-    Directory? downloadsDir = Directory("/storage/emulated/0/Download");
-    if (!downloadsDir.existsSync()) {
-      downloadsDir = await getExternalStorageDirectory();
-    }
+    Directory? downloadsDir = await getExternalStorageDirectory();
     File receivedFile = File('${downloadsDir!.path}/$fileName');
     await receivedFile.writeAsBytes(decryptedFileBytes);
-    print("File successfully saved at: ${receivedFile.path}");
+    debugPrint("File successfully saved at: ${receivedFile.path}");
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Color(0xFF054640), // Updated background color
+      backgroundColor: const Color(0xFF054640),
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            SizedBox(
-              width: MediaQuery.of(context).size.width * 0.8,
-              height: MediaQuery.of(context).size.height * 0.25,
-              child: ElevatedButton(
-                onPressed: _sendFile,
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
-                child: Text("SEND FILE", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
-              ),
+            Text("Your Peer Code: $_peerCode",
+                style: const TextStyle(color: Colors.white, fontSize: 18)),
+            const SizedBox(height: 20),
+            LinearProgressIndicator(value: _progress),
+            const SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: _fetchReceiverIP,
+              child: const Text("SEND FILE",
+                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
             ),
-            SizedBox(height: 20),
-            SizedBox(
-              width: MediaQuery.of(context).size.width * 0.8,
-              height: MediaQuery.of(context).size.height * 0.25,
-              child: ElevatedButton(
-                onPressed: _initializePeerConnection,
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-                child: Text("RECEIVE FILE", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
-              ),
+            const SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: _initializePeerConnection,
+              child: const Text("RECEIVE FILE",
+                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
             ),
           ],
         ),

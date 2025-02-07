@@ -1,29 +1,40 @@
-import os
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from pydantic import BaseModel
 from typing import Dict
 import uvicorn
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
 
+# In-memory storage for registered peers (replace with a database for persistence)
 devices: Dict[str, Dict[str, str]] = {}
 
+# Enable CORS for cross-platform access
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allow all origins
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 class RegisterDevice(BaseModel):
-    device_id: str
+    peerCode: str
 
 @app.post("/register")
 async def register_device(request: Request, data: RegisterDevice):
-    client_ip = request.client.host
-    devices[data.device_id] = {"ip": client_ip}
-    print(f"Registered: {data.device_id} -> {client_ip}")
+    client_ip = request.client.host  # Get sender's public IP
+    devices[data.peerCode] = {"ip": client_ip}  # Store peer info
+
+    print(f"Registered: {data.peerCode} -> {client_ip}")
     return {"message": "Device registered", "ip": client_ip}
 
-@app.get("/lookup/{device_id}")
-async def lookup_device(device_id: str):
-    if device_id in devices:
-        return {"ip": devices[device_id]["ip"]}
-    return {"error": "Device not found"}, 404
+@app.get("/lookup/{peer_code}")
+async def lookup_device(peer_code: str):
+    if peer_code in devices:
+        return {"ip": devices[peer_code]["ip"]}
+    
+    raise HTTPException(status_code=404, detail="Device not found")
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))  # Auto-detect Render's assigned port
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    uvicorn.run(app, host="0.0.0.0", port=8000)
