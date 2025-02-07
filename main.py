@@ -1,11 +1,11 @@
-from main import FastAPI, Request
+import os
+from fastapi import FastAPI, Request
 from pydantic import BaseModel
 from typing import Dict
 import uvicorn
 
 app = FastAPI()
 
-# Store device IPs {device_id: { "ip": "xxx.xxx.xxx.xxx" }}
 devices: Dict[str, Dict[str, str]] = {}
 
 class RegisterDevice(BaseModel):
@@ -13,7 +13,7 @@ class RegisterDevice(BaseModel):
 
 @app.post("/register")
 async def register_device(request: Request, data: RegisterDevice):
-    client_ip = request.client.host  # Get real public IP
+    client_ip = request.client.host
     devices[data.device_id] = {"ip": client_ip}
     print(f"Registered: {data.device_id} -> {client_ip}")
     return {"message": "Device registered", "ip": client_ip}
@@ -25,4 +25,5 @@ async def lookup_device(device_id: str):
     return {"error": "Device not found"}, 404
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=5000)
+    port = int(os.environ.get("PORT", 5000))  # Auto-detect Render's assigned port
+    uvicorn.run(app, host="0.0.0.0", port=port)

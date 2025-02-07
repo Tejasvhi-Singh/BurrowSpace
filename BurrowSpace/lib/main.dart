@@ -13,8 +13,6 @@ void main() {
 }
 
 class BurrowSpaceApp extends StatelessWidget {
-  const BurrowSpaceApp({super.key});
-
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -28,8 +26,6 @@ class BurrowSpaceApp extends StatelessWidget {
 }
 
 class HomePage extends StatefulWidget {
-  const HomePage({super.key});
-
   @override
   _HomePageState createState() => _HomePageState();
 }
@@ -38,8 +34,7 @@ class _HomePageState extends State<HomePage> {
   String? _peerCode;
   RTCPeerConnection? _peerConnection;
   RTCDataChannel? _dataChannel;
-  final String serverUrl =
-      "https://your-server.com"; // Replace with actual discovery server
+  final String serverUrl = "https://burrowspace.onrender.com"; // Replace with actual discovery server
   final encrypt.Key _encryptionKey = encrypt.Key.fromLength(32);
   final encrypt.IV _iv = encrypt.IV.fromLength(16);
 
@@ -61,8 +56,7 @@ class _HomePageState extends State<HomePage> {
       print("Connection state changed: $state");
     };
 
-    _dataChannel = await _peerConnection!
-        .createDataChannel("fileTransfer", RTCDataChannelInit());
+    _dataChannel = await _peerConnection!.createDataChannel("fileTransfer", RTCDataChannelInit());
     _dataChannel!.onMessage = (RTCDataChannelMessage message) {
       _receiveFile(message.text);
     };
@@ -77,11 +71,9 @@ class _HomePageState extends State<HomePage> {
       List<int> fileBytes = await file.readAsBytes();
 
       var encrypter = encrypt.Encrypter(encrypt.AES(_encryptionKey));
-      String encryptedFile =
-          base64Encode(encrypter.encryptBytes(fileBytes, iv: _iv).bytes);
+      String encryptedFile = base64Encode(encrypter.encryptBytes(fileBytes, iv: _iv).bytes);
 
-      _dataChannel?.send(RTCDataChannelMessage(
-          jsonEncode({"fileName": fileName, "data": encryptedFile})));
+      _dataChannel?.send(RTCDataChannelMessage(jsonEncode({"fileName": fileName, "data": encryptedFile})));
       print("File sent successfully: $fileName");
     } else {
       print("No file selected");
@@ -94,8 +86,7 @@ class _HomePageState extends State<HomePage> {
     String fileData = decodedData["data"];
 
     var encrypter = encrypt.Encrypter(encrypt.AES(_encryptionKey));
-    List<int> decryptedFileBytes = encrypter
-        .decryptBytes(encrypt.Encrypted(base64Decode(fileData)), iv: _iv);
+    List<int> decryptedFileBytes = encrypter.decryptBytes(encrypt.Encrypted(base64Decode(fileData)), iv: _iv);
 
     Directory? downloadsDir = Directory("/storage/emulated/0/Download");
     if (!downloadsDir.existsSync()) {
@@ -120,9 +111,7 @@ class _HomePageState extends State<HomePage> {
               child: ElevatedButton(
                 onPressed: _sendFile,
                 style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
-                child: Text("SEND FILE",
-                    style:
-                        TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+                child: Text("SEND FILE", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
               ),
             ),
             SizedBox(height: 20),
@@ -132,9 +121,7 @@ class _HomePageState extends State<HomePage> {
               child: ElevatedButton(
                 onPressed: _initializePeerConnection,
                 style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-                child: Text("RECEIVE FILE",
-                    style:
-                        TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+                child: Text("RECEIVE FILE", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
               ),
             ),
           ],
