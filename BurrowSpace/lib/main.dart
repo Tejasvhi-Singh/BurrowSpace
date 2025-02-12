@@ -21,6 +21,7 @@ class BurrowSpaceApp extends StatelessWidget {
       title: 'Burrow Space',
       theme: ThemeData(
         primarySwatch: Colors.blue,
+        visualDensity: VisualDensity.adaptivePlatformDensity,
       ),
       home: const HomePage(),
     );
@@ -38,7 +39,7 @@ class _HomePageState extends State<HomePage> {
   String? _peerCode;
   RTCPeerConnection? _peerConnection;
   RTCDataChannel? _dataChannel;
-  final double _progress = 0.0;
+  double _progress = 0.0;
   final String serverUrl = "https://burrowspace.onrender.com";
   final encrypt.Key _encryptionKey = encrypt.Key.fromLength(32);
   final encrypt.IV _iv = encrypt.IV.fromLength(16);
@@ -50,38 +51,46 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _initializePeerConnection() async {
-    Map<String, dynamic> configuration = {
-      "iceServers": [
-        {"urls": "stun:stun.l.google.com:19302"}
-      ]
-    };
-    _peerConnection = await createPeerConnection(configuration, {});
+    try {
+      Map<String, dynamic> configuration = {
+        "iceServers": [
+          {"urls": "stun:stun.l.google.com:19302"}
+        ]
+      };
+      _peerConnection = await createPeerConnection(configuration, {});
 
-    _peerConnection!.onConnectionState = (RTCPeerConnectionState state) {
-      debugPrint("Connection state changed: $state");
-    };
+      _peerConnection!.onConnectionState = (RTCPeerConnectionState state) {
+        debugPrint("Connection state changed: $state");
+      };
 
-    _dataChannel = await _peerConnection!
-        .createDataChannel("fileTransfer", RTCDataChannelInit());
-    _dataChannel!.onMessage = (RTCDataChannelMessage message) {
-      _receiveFile(message.text);
-    };
+      _dataChannel = await _peerConnection!
+          .createDataChannel("fileTransfer", RTCDataChannelInit());
+      _dataChannel!.onMessage = (RTCDataChannelMessage message) {
+        _receiveFile(message.text);
+      };
 
-    setState(() {
-      _peerCode = Uuid().v4().substring(0, 8);
-    });
-    debugPrint("Generated Peer Code: $_peerCode");
+      setState(() {
+        _peerCode = Uuid().v4().substring(0, 8);
+      });
+      debugPrint("Generated Peer Code: $_peerCode");
 
-    var response =
-        await http.get(Uri.parse("https://api64.ipify.org?format=json"));
-    String publicIP = jsonDecode(response.body)["ip"];
-    await http.post(
-      Uri.parse("$serverUrl/register"),
-      headers: {"Content-Type": "application/json"},
-      body: jsonEncode({"peerCode": _peerCode, "ip": publicIP}),
-    );
-    debugPrint(
-        "Registered receiver at IP: $publicIP with Peer Code: $_peerCode");
+      var response =
+      await http.get(Uri.parse("https://api64.ipify.org?format=json"));
+      if (response.statusCode == 200) {
+        String publicIP = jsonDecode(response.body)["ip"];
+        await http.post(
+          Uri.parse("$serverUrl/register"),
+          headers: {"Content-Type": "application/json"},
+          body: jsonEncode({"peerCode": _peerCode, "ip": publicIP}),
+        );
+        debugPrint(
+            "Registered receiver at IP: $publicIP with Peer Code: $_peerCode");
+      } else {
+        debugPrint("Failed to fetch public IP: ${response.statusCode}");
+      }
+    } catch (e) {
+      debugPrint("Error initializing peer connection: $e");
+    }
   }
 
   Future<void> _fetchReceiverIP() async {
@@ -97,8 +106,7 @@ class _HomePageState extends State<HomePage> {
           ),
           actions: [
             TextButton(
-              onPressed: () =>
-                  Navigator.of(context).pop(peerCodeController.text),
+              onPressed: () => Navigator.of(context).pop(peerCodeController.text),
               child: const Text("OK"),
             ),
           ],
@@ -111,19 +119,47 @@ class _HomePageState extends State<HomePage> {
       return;
     }
 
-    var response =
-        await http.get(Uri.parse("$serverUrl/lookup/$enteredPeerCode"));
+    var response = await http.get(Uri.parse("$serverUrl/lookup/$enteredPeerCode"));
     var jsonData = jsonDecode(response.body);
     if (jsonData is Map<String, dynamic> && jsonData.containsKey("ip")) {
       String receiverIP = jsonData["ip"];
       debugPrint("Resolved receiver IP: $receiverIP");
-      // Proceed with sending the file
+      await _pickAndSendFile(receiverIP);
     } else {
       debugPrint("Error: Unexpected response format: $jsonData");
     }
   }
 
-  void _receiveFile(String message) async {
+  Future<void> _pickAndSendFile(String receiverIP) async {
+    FilePickerResult? result = await FilePicker.platform.pickFiles();
+
+    if (result != null) {
+      File file = File(result.files.single.path!);
+      List<int> fileBytes = await file.readAsBytes();
+      String fileName = file.path.split('/').last;
+
+      var encrypter = encrypt.Encrypter(encrypt.AES(_encryptionKey));
+      String encryptedData = base64Encode(encrypter.encryptBytes(fileBytes, iv: _iv).bytes);
+
+      String message = jsonEncode({
+        "fileName": fileName,
+        "data": encryptedData,
+      });
+
+      if (_dataChannel != null) {
+        _dataChannel!.send(RTCDataChannelMessage(message));
+        debugPrint("File sent: $fileName");
+      } else {
+        debugPrint("Data channel is not initialized.");
+      }
+    } else {
+      debugPrint("File selection canceled.");
+    }
+  }
+
+void _receiveFile(String message) async {
+  debugPrint("Received message: $message");
+  try {
     var decodedData = jsonDecode(message);
     String fileName = decodedData["fileName"];
     String fileData = decodedData["data"];
@@ -133,36 +169,58 @@ class _HomePageState extends State<HomePage> {
         .decryptBytes(encrypt.Encrypted(base64Decode(fileData)), iv: _iv);
 
     Directory? downloadsDir = await getExternalStorageDirectory();
-    File receivedFile = File('${downloadsDir!.path}/$fileName');
-    await receivedFile.writeAsBytes(decryptedFileBytes);
-    debugPrint("File successfully saved at: ${receivedFile.path}");
+    if (downloadsDir != null) {
+      File receivedFile = File('${downloadsDir.path}/$fileName');
+      await receivedFile.writeAsBytes(decryptedFileBytes);
+      debugPrint("File successfully saved at: ${receivedFile.path}");
+      debugPrint("File received: $fileName");
+    } else {
+      debugPrint("Error: Unable to access downloads directory.");
+    }
+  } catch (e) {
+    debugPrint("Error receiving file: $e");
   }
-
+}
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF054640),
       body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text("Your Peer Code: $_peerCode",
-                style: const TextStyle(color: Colors.white, fontSize: 18)),
-            const SizedBox(height: 20),
-            LinearProgressIndicator(value: _progress),
-            const SizedBox(height: 20),
-            ElevatedButton(
-              onPressed: _fetchReceiverIP,
-              child: const Text("SEND FILE",
-                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
-            ),
-            const SizedBox(height: 20),
-            ElevatedButton(
-              onPressed: _initializePeerConnection,
-              child: const Text("RECEIVE FILE",
-                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
-            ),
-          ],
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                "Your Peer Code: $_peerCode",
+                style: const TextStyle(color: Colors.white, fontSize: 18),
+              ),
+              const SizedBox(height: 20),
+              LinearProgressIndicator(value: _progress),
+              const SizedBox(height: 20),
+              ElevatedButton(
+                onPressed: _fetchReceiverIP,
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 32.0, vertical: 16.0),
+                  textStyle: const TextStyle(
+                      fontSize: 24, fontWeight: FontWeight.bold),
+                ),
+                child: const Text("SEND FILE"),
+              ),
+              const SizedBox(height: 20),
+              ElevatedButton(
+                onPressed: _initializePeerConnection,
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 32.0, vertical: 16.0),
+                  textStyle: const TextStyle(
+                      fontSize: 24, fontWeight: FontWeight.bold),
+                ),
+                child: const Text("RECEIVE FILE"),
+              ),
+            ],
+          ),
         ),
       ),
     );

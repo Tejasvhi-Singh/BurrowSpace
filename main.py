@@ -2,21 +2,21 @@ from fastapi import FastAPI, Request, HTTPException
 from pydantic import BaseModel
 from typing import Dict
 import uvicorn
-from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware import Middleware
+from starlette.middleware.cors import CORSMiddleware
 
-app = FastAPI()
+app = FastAPI(middleware=[
+    Middleware(
+        CORSMiddleware,
+        allow_origins=["*"],  # Allow all origins
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+])
 
 # In-memory storage for registered peers (replace with a database for persistence)
 devices: Dict[str, Dict[str, str]] = {}
-
-# Enable CORS for cross-platform access
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 class RegisterDevice(BaseModel):
     peerCode: str
@@ -31,10 +31,16 @@ async def register_device(request: Request, data: RegisterDevice):
 
 @app.get("/lookup/{peer_code}")
 async def lookup_device(peer_code: str):
-    if peer_code in devices:
+    if (peer_code in devices):
         return {"ip": devices[peer_code]["ip"]}
-    
+
     raise HTTPException(status_code=404, detail="Device not found")
+
+@app.get("/")
+def read_root():
+    return {"message": "Welcome to BurrowSpace!"}
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+    ###### GUHGJHGHJVHJ ########
