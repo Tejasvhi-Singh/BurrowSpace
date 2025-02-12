@@ -31,10 +31,14 @@ async def register_device(request: Request, data: RegisterDevice):
 
 @app.get("/lookup/{peer_code}")
 async def lookup_device(peer_code: str):
-    if (peer_code in devices):
+    if peer_code in devices:
         return {"ip": devices[peer_code]["ip"]}
 
     raise HTTPException(status_code=404, detail="Device not found")
+
+@app.get("/")
+async def read_root():
+    return {"message": "Welcome to BurrowSpace!"}
 
 @app.head("/")
 async def read_root_head():
