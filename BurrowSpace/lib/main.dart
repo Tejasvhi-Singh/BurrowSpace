@@ -53,31 +53,10 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _requestPermissions() async {
-    while (true) {
-      if (await Permission.storage.request().isGranted) {
-        // Permissions are granted, proceed with file operations
-        Directory? downloadsDir = await getExternalStorageDirectory();
-        if (downloadsDir != null) {
-          Directory burrowSpaceDir = Directory('${downloadsDir.path}/Burrow_Space_files');
-          if (!await burrowSpaceDir.exists()) {
-            await burrowSpaceDir.create(recursive: true);
-            debugPrint("Folder created: ${burrowSpaceDir.path}");
-          } else {
-            debugPrint("Folder already exists: ${burrowSpaceDir.path}");
-          }
-        } else {
-          debugPrint("Error: Unable to access downloads directory.");
-        }
-        break;
-      } else if (await Permission.storage.isPermanentlyDenied) {
-        // Handle the case when permissions are permanently denied
-        debugPrint("Storage permission permanently denied.");
-        openAppSettings();
-        break;
-      } else {
-        // Handle the case when permissions are denied but not permanently
-        debugPrint("Storage permission not granted. Asking again...");
-      }
+    if (await Permission.storage.request().isGranted) {
+      // Permissions are granted, proceed with file operations
+    } else {
+      // Handle the case when permissions are not granted
     }
   }
 
