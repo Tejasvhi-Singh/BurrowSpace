@@ -36,8 +36,8 @@ async def lookup_device(peer_code: str):
 
     raise HTTPException(status_code=404, detail="Device not found")
 
-@app.get("/")
-async def read_root():
+@app.head("/")
+async def read_root_head():
     return {"message": "Welcome to BurrowSpace!"}
 
 if __name__ == "__main__":
