@@ -33,14 +33,14 @@ class HomePage extends StatefulWidget {
   const HomePage({super.key});
 
   @override
-  _HomePageState createState() => _HomePageState();
+  HomePageState createState() => HomePageState();
 }
 
-class _HomePageState extends State<HomePage> {
+class HomePageState extends State<HomePage> {
   String? _peerCode;
   RTCPeerConnection? _peerConnection;
   RTCDataChannel? _dataChannel;
-  double _progress = 0.0;
+  final _progress = 0.0;
   final String serverUrl = "https://burrowspace.onrender.com";
   final encrypt.Key _encryptionKey = encrypt.Key.fromLength(32);
   final encrypt.IV _iv = encrypt.IV.fromLength(16);
@@ -48,16 +48,66 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
-    _requestPermissions();
+    requestPermissions();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
     _initializePeerConnection();
   }
 
-  Future<void> _requestPermissions() async {
-    if (await Permission.storage.request().isGranted) {
-      // Permissions are granted, proceed with file operations
-    } else {
-      // Handle the case when permissions are not granted
+  Future<void> requestPermissions() async {
+    bool shouldRequest = await _showPermissionRationale();
+    if (!shouldRequest) return;
+
+    while (true) {
+      try {
+        if (await Permission.storage.request().isGranted) {
+          // Permissions are granted, proceed with file operations
+          Directory? downloadsDir = await getExternalStorageDirectory();
+          if (downloadsDir != null) {
+            Directory burrowSpaceDir = Directory('${downloadsDir.path}/Burrow_Space_files');
+            if (!await burrowSpaceDir.exists()) {
+              await burrowSpaceDir.create(recursive: true);
+            }
+          }
+          break;
+        } else if (await Permission.storage.isPermanentlyDenied) {
+          // Handle the case when permissions are permanently denied
+          openAppSettings();
+          break;
+        } else {
+          // Handle the case when permissions are denied but not permanently
+          debugPrint("Storage permission not granted. Asking again...");
+        }
+      } catch (e) {
+        // Handle any errors that occur during the permission request
+        debugPrint("Error requesting storage permission: $e");
+      }
     }
+  }
+
+  Future<bool> _showPermissionRationale() async {
+    return await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text("Storage Permission Required"),
+          content: const Text("This app needs storage access to save and retrieve files. Please grant the permission."),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text("Cancel"),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text("OK"),
+            ),
+          ],
+        );
+      },
+    ) ?? false;
   }
 
   Future<void> _initializePeerConnection() async {
@@ -70,19 +120,22 @@ class _HomePageState extends State<HomePage> {
       _peerConnection = await createPeerConnection(configuration, {});
 
       _peerConnection!.onConnectionState = (RTCPeerConnectionState state) {
-        debugPrint("Connection state changed: $state");
+        if (mounted) {
+          // Handle connection state change
+        }
       };
 
       _dataChannel = await _peerConnection!
           .createDataChannel("fileTransfer", RTCDataChannelInit());
       _dataChannel!.onMessage = (RTCDataChannelMessage message) {
-        _receiveFile(message.text);
+        if (mounted) {
+          _receiveFile(message.text);
+        }
       };
 
       setState(() {
         _peerCode = Uuid().v4().substring(0, 8);
       });
-      debugPrint("Generated Peer Code: $_peerCode");
 
       var response =
       await http.get(Uri.parse("https://api64.ipify.org?format=json"));
@@ -93,13 +146,11 @@ class _HomePageState extends State<HomePage> {
           headers: {"Content-Type": "application/json"},
           body: jsonEncode({"peerCode": _peerCode, "ip": publicIP}),
         );
-        debugPrint(
-            "Registered receiver at IP: $publicIP with Peer Code: $_peerCode");
-      } else {
-        debugPrint("Failed to fetch public IP: ${response.statusCode}");
       }
     } catch (e) {
-      debugPrint("Error initializing peer connection: $e");
+      if (mounted) {
+        // Handle error initializing peer connection
+      }
     }
   }
 
@@ -125,7 +176,6 @@ class _HomePageState extends State<HomePage> {
     );
 
     if (enteredPeerCode == null || enteredPeerCode.isEmpty) {
-      debugPrint("No peer code entered.");
       return;
     }
 
@@ -133,10 +183,7 @@ class _HomePageState extends State<HomePage> {
     var jsonData = jsonDecode(response.body);
     if (jsonData is Map<String, dynamic> && jsonData.containsKey("ip")) {
       String receiverIP = jsonData["ip"];
-      debugPrint("Resolved receiver IP: $receiverIP");
       await _pickAndSendFile(receiverIP);
-    } else {
-      debugPrint("Error: Unexpected response format: $jsonData");
     }
   }
 
@@ -158,17 +205,11 @@ class _HomePageState extends State<HomePage> {
 
       if (_dataChannel != null) {
         _dataChannel!.send(RTCDataChannelMessage(message));
-        debugPrint("File sent: $fileName");
-      } else {
-        debugPrint("Data channel is not initialized.");
       }
-    } else {
-      debugPrint("File selection canceled.");
     }
   }
 
   void _receiveFile(String message) async {
-    debugPrint("Received message: $message");
     try {
       var decodedData = jsonDecode(message);
       String fileName = decodedData["fileName"];
@@ -183,13 +224,9 @@ class _HomePageState extends State<HomePage> {
         String filePath = '${downloadsDir.path}/$fileName';
         File receivedFile = File(filePath);
         await receivedFile.writeAsBytes(decryptedFileBytes);
-        debugPrint("File successfully saved at: $filePath");
-        debugPrint("File received: $fileName");
-      } else {
-        debugPrint("Error: Unable to access downloads directory.");
       }
     } catch (e) {
-      debugPrint("Error receiving file: $e");
+      // Handle error receiving file
     }
   }
 
