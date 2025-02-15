@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:uuid/uuid.dart';
@@ -8,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:encrypt/encrypt.dart' as encrypt;
 import 'package:http/http.dart' as http;
 import 'package:permission_handler/permission_handler.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 
 void main() {
   runApp(const BurrowSpaceApp());
@@ -46,27 +48,43 @@ class HomePageState extends State<HomePage> {
   final encrypt.Key _encryptionKey = encrypt.Key.fromLength(32);
   final encrypt.IV _iv = encrypt.IV.fromLength(16);
   bool _permissionsGranted = false;
+  bool _isConnected = false;
+  List<String> _logs = [];
 
   @override
   void initState() {
     super.initState();
-    _checkAndRequestPermissions();
-    _initializePeerConnection();
+    _checkInternetConnection();
+    _requestPermission();
   }
 
-  Future<void> _checkAndRequestPermissions() async {
-    PermissionStatus status = await Permission.storage.status;
+  void _log(String message) {
+    _logs.add(message);
+    debugPrint(message);
+  }
 
-    if (status.isDenied) {
-      bool shouldShowRequestRationale = await Permission.storage.shouldShowRequestRationale;
-      if (shouldShowRequestRationale) {
-        _showPermissionDialog();
-      } else {
-        await Permission.storage.request();
-      }
+  Future<void> _checkInternetConnection() async {
+    var connectivityResult = await (Connectivity().checkConnectivity());
+    setState(() {
+      _isConnected = connectivityResult == ConnectivityResult.mobile || connectivityResult == ConnectivityResult.wifi;
+    });
+  }
+
+  Future<void> _requestPermission() async {
+    PermissionStatus storageStatus = await Permission.storage.request();
+
+    if (storageStatus.isGranted) {
+      _log("Storage permission granted.");
     } else {
-      _permissionsGranted = true;
-      debugPrint("Permissions granted.");
+      _log("Storage permission denied.");
+      _showPermissionDialog();
+    }
+
+    if (_isConnected) {
+      _log("Internet connection available.");
+      _initializePeerConnection();
+    } else {
+      _log("Internet connection not available.");
     }
   }
 
@@ -102,14 +120,14 @@ class HomePageState extends State<HomePage> {
 
       _peerConnection!.onConnectionState = (RTCPeerConnectionState state) {
         if (mounted) {
-          debugPrint("Connection state: $state");
+          _log("Connection state: $state");
         }
       };
 
-      _dataChannel = await _peerConnection!
-          .createDataChannel("fileTransfer", RTCDataChannelInit());
+      _dataChannel = await _peerConnection!.createDataChannel("fileTransfer", RTCDataChannelInit());
       _dataChannel!.onMessage = (RTCDataChannelMessage message) {
         if (mounted) {
+          _log("Message received: ${message.text}");
           _receiveFile(message.text);
         }
       };
@@ -126,16 +144,20 @@ class HomePageState extends State<HomePage> {
           headers: {"Content-Type": "application/json"},
           body: jsonEncode({"peerCode": _peerCode, "ip": publicIP}),
         );
-        debugPrint("Peer registered with IP: $publicIP");
+        _log("Peer registered with IP: $publicIP");
+        _log("Data channel state: ${_dataChannel!.state}");
+        _log("UUID: $_peerCode");
       }
     } catch (e) {
       if (mounted) {
-        debugPrint("Error initializing peer connection: $e");
+        _log("Error initializing peer connection: $e");
       }
     }
   }
 
   Future<void> _fetchReceiverIP() async {
+    await _requestPermission();
+
     String? enteredPeerCode = await showDialog<String>(
       context: context,
       builder: (BuildContext context) {
@@ -165,7 +187,7 @@ class HomePageState extends State<HomePage> {
     if (jsonData is Map<String, dynamic> && jsonData.containsKey("ip")) {
       String receiverIP = jsonData["ip"];
       await _pickAndSendFile(receiverIP);
-      debugPrint("Receiver IP: $receiverIP");
+      _log("Receiver IP: $receiverIP");
     }
   }
 
@@ -186,9 +208,22 @@ class HomePageState extends State<HomePage> {
       });
 
       if (_dataChannel != null) {
+        await _waitForDataChannelOpen();
         _dataChannel!.send(RTCDataChannelMessage(message));
-        debugPrint("File sent: $fileName");
+        _log("File sent: $fileName");
+        _log("Data channel state: ${_dataChannel!.state}");
+        _log("UUID: $_peerCode");
+      } else {
+        _log("Data channel is not open.");
       }
+    }
+  }
+
+  Future<void> _waitForDataChannelOpen() async {
+    int retries = 10;
+    while (_dataChannel!.state != RTCDataChannelState.RTCDataChannelOpen && retries > 0) {
+      await Future.delayed(const Duration(seconds: 1));
+      retries--;
     }
   }
 
@@ -199,18 +234,19 @@ class HomePageState extends State<HomePage> {
       String fileData = decodedData["data"];
 
       var encrypter = encrypt.Encrypter(encrypt.AES(_encryptionKey));
-      List<int> decryptedFileBytes = encrypter
-          .decryptBytes(encrypt.Encrypted(base64Decode(fileData)), iv: _iv);
+      List<int> decryptedFileBytes = encrypter.decryptBytes(encrypt.Encrypted(base64Decode(fileData)), iv: _iv);
 
       Directory? downloadsDir = await getExternalStorageDirectory();
       if (downloadsDir != null) {
         String filePath = '${downloadsDir.path}/$fileName';
         File receivedFile = File(filePath);
         await receivedFile.writeAsBytes(decryptedFileBytes);
-        debugPrint("File received: $fileName");
+        _log("File received: $fileName");
+      } else {
+        _log("Downloads directory not found.");
       }
     } catch (e) {
-      debugPrint("Error receiving file: $e");
+      _log("Error receiving file: $e");
     }
   }
 
@@ -224,10 +260,12 @@ class HomePageState extends State<HomePage> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Text(
-                "Your Peer Code: $_peerCode",
-                style: const TextStyle(color: Colors.white, fontSize: 18),
-              ),
+              _peerCode == null
+                  ? CircularProgressIndicator()
+                  : Text(
+                      "Your Peer Code: $_peerCode",
+                      style: const TextStyle(color: Colors.white, fontSize: 18),
+                    ),
               const SizedBox(height: 20),
               LinearProgressIndicator(value: _progress),
               const SizedBox(height: 20),
