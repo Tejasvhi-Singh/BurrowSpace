@@ -54,8 +54,22 @@ class HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
+    _requestPermissions();
     _checkInternetConnection();
-    _requestPermission();
+    _initializePeerConnection();
+  }
+
+  Future<void> _requestPermissions() async {
+    Map<Permission, PermissionStatus> statuses = await [
+      Permission.camera,
+      Permission.location,
+      Permission.mediaLibrary,
+      Permission.storage,
+    ].request();
+
+    statuses.forEach((permission, status) {
+      debugPrint('$permission: $status');
+    });
   }
 
   void _log(String message) {
@@ -70,94 +84,65 @@ class HomePageState extends State<HomePage> {
     });
   }
 
-  Future<void> _requestPermission() async {
-    PermissionStatus storageStatus = await Permission.storage.request();
+Future<void> _initializePeerConnection() async {
+  try {
+    Map<String, dynamic> configuration = {
+      "iceServers": [
+        {"urls": "stun:stun.l.google.com:19302"}
+      ]
+    };
+    _peerConnection = await createPeerConnection(configuration, {});
 
-    if (storageStatus.isGranted) {
-      _log("Storage permission granted.");
-    } else {
-      _log("Storage permission denied.");
-      _showPermissionDialog();
-    }
-
-    if (_isConnected) {
-      _log("Internet connection available.");
-      _initializePeerConnection();
-    } else {
-      _log("Internet connection not available.");
-    }
-  }
-
-  void _showPermissionDialog() {
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: const Text("Permission Required"),
-          content: const Text("This app needs storage permission to provide a better experience. Please enable it in the app settings."),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.of(context).pop();
-                openAppSettings();
-              },
-              child: const Text("Open Settings"),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  Future<void> _initializePeerConnection() async {
-    try {
-      Map<String, dynamic> configuration = {
-        "iceServers": [
-          {"urls": "stun:stun.l.google.com:19302"}
-        ]
-      };
-      _peerConnection = await createPeerConnection(configuration, {});
-
-      _peerConnection!.onConnectionState = (RTCPeerConnectionState state) {
-        if (mounted) {
-          _log("Connection state: $state");
-        }
-      };
-
-      _dataChannel = await _peerConnection!.createDataChannel("fileTransfer", RTCDataChannelInit());
-      _dataChannel!.onMessage = (RTCDataChannelMessage message) {
-        if (mounted) {
-          _log("Message received: ${message.text}");
-          _receiveFile(message.text);
-        }
-      };
-
-      setState(() {
-        _peerCode = Uuid().v4().substring(0, 8);
-      });
-
-      var response = await http.get(Uri.parse("https://api64.ipify.org?format=json"));
-      if (response.statusCode == 200) {
-        String publicIP = jsonDecode(response.body)["ip"];
-        await http.post(
-          Uri.parse("$serverUrl/register"),
-          headers: {"Content-Type": "application/json"},
-          body: jsonEncode({"peerCode": _peerCode, "ip": publicIP}),
-        );
-        _log("Peer registered with IP: $publicIP");
-        _log("Data channel state: ${_dataChannel!.state}");
-        _log("UUID: $_peerCode");
-      }
-    } catch (e) {
+    _peerConnection!.onConnectionState = (RTCPeerConnectionState state) {
       if (mounted) {
-        _log("Error initializing peer connection: $e");
+        _log("Connection state: $state");
       }
+    };
+
+    // Create a data channel
+    _dataChannel = await _peerConnection!.createDataChannel("fileTransfer", RTCDataChannelInit());
+
+    // Check if data channel is created successfully
+    if (_dataChannel == null) {
+      _log("Failed to create data channel.");
+      return;
+    }
+
+    // Set up event listeners
+    _dataChannel!.onDataChannelState = (RTCDataChannelState state) {
+      _log("Data channel state: $state");
+    };
+    _dataChannel!.onMessage = (RTCDataChannelMessage message) {
+      if (mounted) {
+        _log("Message received: ${message.text}");
+        _receiveFile(message.text);
+      }
+    };
+
+    setState(() {
+      _peerCode = Uuid().v4().substring(0, 8);
+    });
+
+    var response = await http.get(Uri.parse("https://api64.ipify.org?format=json"));
+    if (response.statusCode == 200) {
+      String publicIP = jsonDecode(response.body)["ip"];
+      await http.post(
+        Uri.parse("$serverUrl/register"),
+        headers: {"Content-Type": "application/json"},
+        body: jsonEncode({"peerCode": _peerCode, "ip": publicIP}),
+      );
+      _log("Peer registered with IP: $publicIP");
+      _log("Data channel state: ${_dataChannel!.state}");
+      _log("UUID: $_peerCode");
+    }
+  } catch (e) {
+    if (mounted) {
+      _log("Error initializing peer connection: $e");
     }
   }
+}
 
   Future<void> _fetchReceiverIP() async {
-    await _requestPermission();
-
     String? enteredPeerCode = await showDialog<String>(
       context: context,
       builder: (BuildContext context) {
